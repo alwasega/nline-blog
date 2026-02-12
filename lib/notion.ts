@@ -100,7 +100,7 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
 
   for (const [key, blockRecord] of Object.entries(recordMap.block)) {
     if (!blockRecord?.value) {
-      // Skip blocks without a value
+      // Skip blocks with no value
       continue
     }
 
