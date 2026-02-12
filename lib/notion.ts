@@ -39,10 +39,10 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
     // Also map the original key to itself (in case it's already in the format we need)
     normalizedBlockKeys.set(key, key)
   }
-  
+
   const referencedBlockIds = new Set<string>()
   const missingBlockIds = new Set<string>()
-  
+
   for (const [key, blockRecord] of Object.entries(recordMap.block)) {
     // Check if block has content array - handle nested value structure
     // Some blocks have blockRecord.value.value instead of blockRecord.value directly
@@ -55,24 +55,29 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
           // 2. Try normalized (undashed)
           // 3. Try with dashes if it's undashed
           let actualKey: string | undefined = undefined
-          
+
           // First try the childId as-is
           if (allBlockKeysSet.has(childId)) {
             actualKey = childId
           } else {
             // Try normalized version
-            const normalizedChildId = parsePageId(childId, { uuid: false }) || childId
+            const normalizedChildId =
+              parsePageId(childId, { uuid: false }) || childId
             actualKey = normalizedBlockKeys.get(normalizedChildId)
-            
+
             // If still not found, try adding dashes if it's a 32-char hex string
-            if (!actualKey && normalizedChildId.length === 32 && /^[0-9a-f]+$/i.test(normalizedChildId)) {
+            if (
+              !actualKey &&
+              normalizedChildId.length === 32 &&
+              /^[0-9a-f]+$/i.test(normalizedChildId)
+            ) {
               const dashedId = `${normalizedChildId.slice(0, 8)}-${normalizedChildId.slice(8, 12)}-${normalizedChildId.slice(12, 16)}-${normalizedChildId.slice(16, 20)}-${normalizedChildId.slice(20)}`
               if (allBlockKeysSet.has(dashedId)) {
                 actualKey = dashedId
               }
             }
           }
-          
+
           if (actualKey) {
             referencedBlockIds.add(actualKey)
           } else {
@@ -83,7 +88,7 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
       }
     }
   }
-  
+
   // Log summary of missing blocks instead of individual warnings
   if (missingBlockIds.size > 0) {
     console.warn(
@@ -102,8 +107,8 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
     // Handle nested value structure: blockRecord.value.value or blockRecord.value
     // react-notion-x expects blockRecord.value to BE the block, not a wrapper
     const hasNestedValue = !!(blockRecord.value as any)?.value
-    const actualBlock = hasNestedValue 
-      ? (blockRecord.value as any).value 
+    const actualBlock = hasNestedValue
+      ? (blockRecord.value as any).value
       : blockRecord.value
 
     // CRITICAL: If we have a nested structure, flatten it by replacing blockRecord.value
@@ -145,7 +150,7 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
         blockValue.type = 'text'
       }
     }
-    
+
     // Verify the type was set (for debugging)
     if (!hadType && !blockValue.type) {
       console.warn(`Failed to set type for block ${key}`, {
@@ -161,16 +166,16 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
     if (key && typeof key === 'string' && key.length > 0) {
       // Always set the ID - use the key as it's the canonical block ID
       const finalId = key
-      
+
       // Set id on blockRecord.value (what react-notion-x reads)
       // Since we've flattened the structure, blockRecord.value IS the block
       if (!blockValue.id || blockValue.id === '') {
         blockValue.id = finalId
       }
-      
+
       // Store block with original key
       sanitizedBlocks[key] = blockRecord
-      
+
       // Also store with normalized (undashed) key if different
       // This ensures react-notion-x can find blocks when it uses uuidToId (which removes dashes)
       const normalizedKey = parsePageId(key, { uuid: false }) || key
@@ -180,19 +185,20 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
     }
   }
 
-
   // Sanitize collections similar to blocks - they might also have nested structures
   const sanitizedCollections: typeof recordMap.collection = {}
   if (recordMap.collection) {
-    for (const [key, collectionRecord] of Object.entries(recordMap.collection)) {
+    for (const [key, collectionRecord] of Object.entries(
+      recordMap.collection
+    )) {
       if (!collectionRecord?.value) {
         continue
       }
 
       // Handle nested value structure for collections too
       const hasNestedValue = !!(collectionRecord.value as any)?.value
-      const actualCollection = hasNestedValue 
-        ? (collectionRecord.value as any).value 
+      const actualCollection = hasNestedValue
+        ? (collectionRecord.value as any).value
         : collectionRecord.value
 
       // Flatten nested structure if needed

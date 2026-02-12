@@ -12,14 +12,19 @@ export function useDarkMode() {
     setIsClient(true)
 
     // Only access localStorage on the client
-    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.localStorage !== 'undefined'
+    ) {
       try {
         const stored = window.localStorage.getItem(STORAGE_KEY)
         if (stored !== null) {
           setIsDarkMode(JSON.parse(stored))
         } else {
           // Check system preference
-          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          const prefersDark = window.matchMedia(
+            '(prefers-color-scheme: dark)'
+          ).matches
           setIsDarkMode(prefersDark)
         }
       } catch (err) {
@@ -44,7 +49,10 @@ export function useDarkMode() {
     }
 
     // Save to localStorage
-    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.localStorage !== 'undefined'
+    ) {
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(isDarkMode))
       } catch (err) {
