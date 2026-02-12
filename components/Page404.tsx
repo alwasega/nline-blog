@@ -25,7 +25,11 @@ export function Page404({ site, pageId, error }: types.PageProps) {
               </p>
             )
           )}
-          <h3><a className="notion-link" href={config.host}>Return home</a></h3>
+          <h3>
+            <a className='notion-link' href={config.host}>
+              Return home
+            </a>
+          </h3>
 
           <img
             src='/404.png'
