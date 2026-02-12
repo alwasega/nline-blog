@@ -16,6 +16,41 @@ import {
 import { notion } from './notion-api'
 import { getPreviewImageMap } from './preview-images'
 
+/**
+ * Sanitizes a recordMap by ensuring all blocks have valid IDs.
+ * This prevents errors when react-notion-x tries to call uuidToId with undefined.
+ * In Notion's recordMap, the key is the block ID, so we ensure value.id matches the key.
+ */
+function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
+  if (!recordMap?.block) {
+    return recordMap
+  }
+
+  const sanitizedBlocks: typeof recordMap.block = {}
+  
+  for (const [key, blockRecord] of Object.entries(recordMap.block)) {
+    if (!blockRecord?.value) {
+      // Skip blocks without a value
+      continue
+    }
+
+    // Ensure the block has an ID - use the key as fallback if value.id is missing
+    if (!blockRecord.value.id && key) {
+      blockRecord.value.id = key
+    }
+
+    // Only include blocks that have a valid ID (either from value.id or key)
+    if (blockRecord.value.id) {
+      sanitizedBlocks[key] = blockRecord
+    }
+  }
+
+  return {
+    ...recordMap,
+    block: sanitizedBlocks
+  }
+}
+
 const getNavigationLinkPages = pMemoize(
   async (): Promise<ExtendedRecordMap[]> => {
     const navigationLinkPageIds = (navigationLinks || [])
@@ -64,7 +99,8 @@ export async function getPage(pageId: string): Promise<ExtendedRecordMap> {
     ;(recordMap as any).preview_images = previewImageMap
   }
 
-  return recordMap
+  // Sanitize the recordMap to remove blocks without valid IDs
+  return sanitizeRecordMap(recordMap)
 }
 
 export async function search(params: SearchParams): Promise<SearchResults> {
