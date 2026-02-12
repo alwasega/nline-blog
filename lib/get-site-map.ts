@@ -5,7 +5,7 @@ import type * as types from './types'
 import * as config from './config'
 import { includeNotionIdInUrls } from './config'
 import { getCanonicalPageId } from './get-canonical-page-id'
-import { notion } from './notion-api'
+import { getPage as getSanitizedPage } from './notion'
 
 const uuid = !!includeNotionIdInUrls
 
@@ -27,7 +27,8 @@ const getAllPages = pMemoize(getAllPagesImpl, {
 
 const getPage = async (pageId: string, ...args) => {
   console.log('\nnotion getPage', uuidToId(pageId))
-  return notion.getPage(pageId, ...args)
+  // Use our sanitized getPage to ensure proper block structure
+  return getSanitizedPage(pageId)
 }
 
 async function getAllPagesImpl(
@@ -47,7 +48,9 @@ async function getAllPagesImpl(
         throw new Error(`Error loading page "${pageId}"`)
       }
 
-      const block = recordMap.block[pageId]?.value
+      // Handle nested block structure - get the actual block value
+      const blockRecord = recordMap.block[pageId]
+      const block = (blockRecord?.value as any)?.value || blockRecord?.value
       if (
         !(getPageProperty<boolean | null>('Public', block, recordMap) ?? true)
       ) {
