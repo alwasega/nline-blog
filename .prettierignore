@@ -7,3 +7,6 @@ node_modules/
 
 .demo/
 .renderer/
+
+# Minified files
+public/js/*.min.js

@@ -27,7 +27,7 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
   }
 
   const sanitizedBlocks: typeof recordMap.block = {}
-  
+
   for (const [key, blockRecord] of Object.entries(recordMap.block)) {
     if (!blockRecord?.value) {
       // Skip blocks without a value

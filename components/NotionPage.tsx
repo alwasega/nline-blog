@@ -170,7 +170,7 @@ export function NotionPage({
   // lite mode is for oembed
   const isLiteMode = lite === 'true'
 
-  const isDarkMode = false;
+  const isDarkMode = false
 
   const siteMapPageUrl = React.useMemo(() => {
     const params: any = {}
@@ -231,8 +231,8 @@ export function NotionPage({
 
   const socialImage = mapImageUrl(
     getPageProperty<string>('Social Image', block, recordMap) ||
-    config.defaultPageCover ||
-    (block as PageBlock).format?.page_cover,
+      config.defaultPageCover ||
+      (block as PageBlock).format?.page_cover,
     block
   )
 

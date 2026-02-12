@@ -73,10 +73,13 @@ export default async function (req: NextApiRequest, res: NextApiResponse) {
     const description =
       getPageProperty<string>('Description', block, recordMap) ||
       config.description
-    const url = getCanonicalPageUrl({
-      ...config.site,
-      domain: new URL(siteUrl).host
-    }, recordMap)(pageId)
+    const url = getCanonicalPageUrl(
+      {
+        ...config.site,
+        domain: new URL(siteUrl).host
+      },
+      recordMap
+    )(pageId)
     const socialImageUrl = getSocialImageUrl(pageId)
     const authorList =
       getPageProperty<string>('Authors', block, recordMap) || config.author

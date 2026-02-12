@@ -33,9 +33,13 @@ export const getCanonicalPageUrl =
     if (uuidToId(pageId) === site.rootNotionPageId) {
       return `${protocol}://${site.domain}`
     } else {
-      return `${protocol}://${site.domain}/${getCanonicalPageId(pageUuid, recordMap, {
-        uuid
-      })}`
+      return `${protocol}://${site.domain}/${getCanonicalPageId(
+        pageUuid,
+        recordMap,
+        {
+          uuid
+        }
+      )}`
     }
   }
 
