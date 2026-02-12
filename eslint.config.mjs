@@ -11,7 +11,7 @@ const compat = new FlatCompat({
     allConfig: js.configs.all
 });
 
-export default [...compat.extends("@fisch0920/eslint-config"), {
+export default [...compat.extends("next"), {
     rules: {
         "react/prop-types": "off",
         "unicorn/no-array-reduce": "off",

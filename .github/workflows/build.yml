@@ -30,7 +30,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run test
-        run: bun test
+        run: bun run test
 
       # TODO Enable those lines below if you use a Redis cache, you'll also need to configure GitHub Repository Secrets
       # env:
