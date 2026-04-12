@@ -3,7 +3,12 @@ import {
   type SearchParams,
   type SearchResults
 } from 'notion-types'
-import { mergeRecordMaps, parsePageId, uuidToId } from 'notion-utils'
+import {
+  getPageProperty,
+  mergeRecordMaps,
+  parsePageId,
+  uuidToId
+} from 'notion-utils'
 import pMap from 'p-map'
 import pMemoize from 'p-memoize'
 
@@ -212,11 +217,39 @@ function sanitizeRecordMap(recordMap: ExtendedRecordMap): ExtendedRecordMap {
     }
   }
 
+  const sanitizedCollectionViews: typeof recordMap.collection_view = {}
+  if (recordMap.collection_view) {
+    for (const [key, collectionViewRecord] of Object.entries(
+      recordMap.collection_view
+    )) {
+      if (!collectionViewRecord?.value) {
+        continue
+      }
+
+      const hasNestedValue = !!(collectionViewRecord.value as any)?.value
+      const actualCollectionView = hasNestedValue
+        ? (collectionViewRecord.value as any).value
+        : collectionViewRecord.value
+
+      if (hasNestedValue && actualCollectionView) {
+        const wrapperProps = { ...(collectionViewRecord.value as any) }
+        delete wrapperProps.value
+        collectionViewRecord.value = {
+          ...wrapperProps,
+          ...actualCollectionView
+        } as any
+      }
+
+      sanitizedCollectionViews[key] = collectionViewRecord
+    }
+  }
+
   // Preserve all other recordMap properties (space, etc.)
   return {
     ...recordMap,
     block: sanitizedBlocks,
-    collection: sanitizedCollections
+    collection: sanitizedCollections,
+    collection_view: sanitizedCollectionViews
   }
 }
 
@@ -246,6 +279,245 @@ const getNavigationLinkPages = pMemoize(
   }
 )
 
+async function hydrateCollectionQueries(
+  recordMap: ExtendedRecordMap
+): Promise<ExtendedRecordMap> {
+  const blocks = Object.values(recordMap.block || {})
+    .map((b: any) => (b?.value as any)?.value || b?.value)
+    .filter(Boolean)
+
+  const collectionViewBlocks = blocks.filter(
+    (block: any) =>
+      block?.type === 'collection_view' || block?.type === 'collection_view_page'
+  )
+
+  if (!collectionViewBlocks.length) return recordMap
+
+  ;(recordMap as any).collection_query ||= {}
+
+  const tasks: Array<{
+    collectionId: string
+    collectionViewId: string
+  }> = []
+
+  for (const block of collectionViewBlocks) {
+    const collectionId = block?.collection_id
+    const viewIds: string[] = block?.view_ids || []
+    if (!collectionId || !viewIds.length) continue
+
+    for (const collectionViewId of viewIds) {
+      const existing = (recordMap as any).collection_query?.[collectionId]?.[
+        collectionViewId
+      ]
+      if (!existing) {
+        tasks.push({ collectionId, collectionViewId })
+      }
+    }
+  }
+
+  if (!tasks.length) return recordMap
+
+  await pMap(
+    tasks,
+    async ({ collectionId, collectionViewId }) => {
+      try {
+        const collectionView = (recordMap as any).collection_view?.[
+          collectionViewId
+        ]?.value
+
+        const collectionData = await notion.getCollectionData(
+          collectionId,
+          collectionViewId,
+          collectionView,
+          { limit: 200 }
+        )
+
+        ;(recordMap as any).collection_query[collectionId] ||= {}
+        const rawResult = (collectionData as any)?.result
+        const normalizedCollectionQuery =
+          rawResult?.type === 'reducer'
+            ? rawResult.reducerResults
+            : // Fallback for older query shapes
+              rawResult
+
+        ;(recordMap as any).collection_query[collectionId][collectionViewId] =
+          normalizedCollectionQuery
+
+        // Ensure the recordMap contains the page blocks referenced by this view.
+        // Without merging, galleries can render with an empty grid even though blockIds exist.
+        const extraRecordMap = (collectionData as any)?.recordMap
+        if (extraRecordMap) {
+          recordMap = mergeRecordMaps(recordMap, extraRecordMap)
+        }
+      } catch (err: any) {
+        console.warn('failed to hydrate collection view', {
+          collectionId,
+          collectionViewId,
+          message: err?.message,
+          cause: err?.cause?.message || err?.cause
+        })
+      }
+    },
+    { concurrency: 4 }
+  )
+
+  return recordMap
+}
+
+function ensureBlogGalleryCovers(recordMap: ExtendedRecordMap) {
+  // Our blog database has these two properties, so we can target it safely.
+  const blogCollectionIds = Object.keys((recordMap as any).collection || {}).filter(
+    (collectionId) => {
+      const schema = (recordMap as any).collection?.[collectionId]?.value?.schema
+      if (!schema) return false
+      const names = new Set(
+        Object.values(schema).map((p: any) => String(p?.name || ''))
+      )
+      return names.has('Slug') && names.has('Published')
+    }
+  )
+
+  if (!blogCollectionIds.length) return recordMap
+
+  // Force *blog* gallery views to use page_cover so card covers are consistent.
+  const blogViewIds = new Set<string>()
+  for (const blockRec of Object.values((recordMap as any).block || {})) {
+    const block = (blockRec as any)?.value
+    if (
+      block?.type === 'collection_view' &&
+      blogCollectionIds.includes(block?.collection_id) &&
+      Array.isArray(block?.view_ids)
+    ) {
+      for (const vid of block.view_ids) blogViewIds.add(String(vid))
+    }
+  }
+
+  for (const viewId of blogViewIds) {
+    const view = (recordMap as any).collection_view?.[viewId]?.value
+    if (view?.type === 'gallery') {
+      view.format ||= {}
+      view.format.gallery_cover = { type: 'page_cover' }
+    }
+  }
+
+  const filePropId = '=nBc' // "Files & media"
+  const urlPropId = 'DbrO' // "Image"
+
+  for (const collectionId of blogCollectionIds) {
+    const views = (recordMap as any).collection_query?.[collectionId] || {}
+    for (const q of Object.values(views)) {
+      const blockIds: string[] =
+        (q as any)?.collection_group_results?.blockIds ||
+        (q as any)?.blockIds ||
+        []
+
+      for (const pageId of blockIds) {
+        const page = (recordMap as any).block?.[pageId]?.value
+        if (!page || page.type !== 'page') continue
+
+        page.format ||= {}
+        if (page.format.page_cover) continue
+
+        const files = page?.properties?.[filePropId]
+        // notion file prop shape: [ [name, [ ['a', url] ] ] ]
+        const fileUrl =
+          Array.isArray(files) &&
+          Array.isArray(files?.[0]) &&
+          Array.isArray(files?.[0]?.[1]) &&
+          Array.isArray(files?.[0]?.[1]?.[0]) &&
+          files?.[0]?.[1]?.[0]?.[1]
+            ? String(files[0][1][0][1])
+            : null
+
+        const imageUrlProp = page?.properties?.[urlPropId]?.[0]?.[0]
+          ? String(page.properties[urlPropId][0][0])
+          : null
+
+        const derivedCover = fileUrl || imageUrlProp
+        if (derivedCover) {
+          page.format.page_cover = derivedCover
+        }
+      }
+    }
+  }
+
+  return recordMap
+}
+
+function sortCollectionQueriesByDate(recordMap: ExtendedRecordMap) {
+  const collectionQuery = (recordMap as any).collection_query
+  if (!collectionQuery) return recordMap
+
+  for (const [collectionId, views] of Object.entries(collectionQuery)) {
+    const collectionSchema = (recordMap as any).collection?.[collectionId]?.value
+      ?.schema
+    const hasSlugProp =
+      !!collectionSchema &&
+      Object.values(collectionSchema).some((p: any) => p?.name === 'Slug')
+    const hasPublishedProp =
+      !!collectionSchema &&
+      Object.values(collectionSchema).some((p: any) => p?.name === 'Published')
+
+    for (const [viewId, q] of Object.entries(views as any)) {
+      const blockIds: string[] =
+        (q as any)?.collection_group_results?.blockIds ||
+        (q as any)?.blockIds ||
+        []
+
+      if (!Array.isArray(blockIds) || !blockIds.length) continue
+
+      // If this collection looks like our blog database (has Slug/Published),
+      // filter out rows that aren't publishable to avoid blank / ID-only pages.
+      const filtered = hasSlugProp || hasPublishedProp
+        ? blockIds.filter((id) => {
+            const block = (recordMap as any).block?.[id]?.value
+            if (!block || block.type !== 'page') return false
+
+            if (hasPublishedProp) {
+              const published = getPageProperty<boolean>('Published', block, recordMap)
+              if (published === false) return false
+            }
+
+            if (hasSlugProp) {
+              const slug = getPageProperty<string>('Slug', block, recordMap)
+              if (!slug || !String(slug).trim()) return false
+            }
+
+            // Must have a title
+            const title = (block as any)?.properties?.title?.[0]?.[0]
+            if (!title || !String(title).trim()) return false
+
+            return true
+          })
+        : blockIds
+
+      const sorted = [...filtered].sort((a, b) => {
+        const blockA = (recordMap as any).block?.[a]?.value
+        const blockB = (recordMap as any).block?.[b]?.value
+        const dateA =
+          (getPageProperty<number>('Date', blockA, recordMap) as any) ??
+          blockA?.last_edited_time ??
+          blockA?.created_time ??
+          0
+        const dateB =
+          (getPageProperty<number>('Date', blockB, recordMap) as any) ??
+          blockB?.last_edited_time ??
+          blockB?.created_time ??
+          0
+        return Number(dateB || 0) - Number(dateA || 0)
+      })
+
+      if ((q as any)?.collection_group_results?.blockIds) {
+        ;(q as any).collection_group_results.blockIds = sorted
+      } else if (Array.isArray((q as any)?.blockIds)) {
+        ;(q as any).blockIds = sorted
+      }
+    }
+  }
+
+  return recordMap
+}
+
 export async function getPage(pageId: string): Promise<ExtendedRecordMap> {
   // Enable fetchMissingBlocks to ensure all child blocks are fetched with complete data
   // This is important because blocks referenced in content arrays need to have their type property
@@ -254,6 +526,12 @@ export async function getPage(pageId: string): Promise<ExtendedRecordMap> {
     fetchMissingBlocks: true,
     fetchCollections: true
   })
+
+  // Notion's API sometimes returns collection view queries in "client mode" without
+  // populating `recordMap.collection_query`. Ensure collection views are hydrated
+  // so react-notion-x can render embedded databases (gallery/table/etc).
+  recordMap = await hydrateCollectionQueries(recordMap)
+
   if (navigationStyle !== 'default' && rootNotionPageId === pageId) {
     // ensure that any pages linked to in the custom navigation header have
     // their block info fully resolved in the page record map so we know
@@ -275,7 +553,10 @@ export async function getPage(pageId: string): Promise<ExtendedRecordMap> {
   }
 
   // Sanitize the recordMap to remove blocks without valid IDs
-  return sanitizeRecordMap(recordMap)
+  recordMap = sanitizeRecordMap(recordMap)
+  recordMap = ensureBlogGalleryCovers(recordMap)
+  recordMap = sortCollectionQueriesByDate(recordMap)
+  return recordMap
 }
 
 export async function search(params: SearchParams): Promise<SearchResults> {
