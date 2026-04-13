@@ -5,7 +5,7 @@ import type * as types from './types'
 import * as config from './config'
 import { includeNotionIdInUrls } from './config'
 import { getCanonicalPageId } from './get-canonical-page-id'
-import { getPage as getSanitizedPage } from './notion'
+import { notion } from './notion-api'
 
 const uuid = !!includeNotionIdInUrls
 
@@ -27,8 +27,14 @@ const getAllPages = pMemoize(getAllPagesImpl, {
 
 const getPage = async (pageId: string, ...args) => {
   console.log('\nnotion getPage', uuidToId(pageId))
-  // Use our sanitized getPage to ensure proper block structure
-  return getSanitizedPage(pageId)
+  // For sitemap generation we only need metadata (titles, public flag, etc).
+  // Avoid hydrating collection queries here to reduce Notion load / rate limits.
+  return notion.getPage(pageId, {
+    fetchMissingBlocks: false,
+    fetchCollections: false,
+    signFileUrls: false,
+    chunkLimit: 1
+  })
 }
 
 async function getAllPagesImpl(
@@ -45,7 +51,10 @@ async function getAllPagesImpl(
     (map, pageId: string) => {
       const recordMap = pageMap[pageId]
       if (!recordMap) {
-        throw new Error(`Error loading page "${pageId}"`)
+        // If Notion fails to load a page during build (network, rate limits, etc),
+        // skip it so the rest of the site can still build.
+        console.warn('skipping page due to load failure', { pageId })
+        return map
       }
 
       // Handle nested block structure - get the actual block value
