@@ -288,11 +288,11 @@ async function hydrateCollectionQueries(
 
   const collectionViewBlocks = blocks.filter(
     (block: any) =>
-      block?.type === 'collection_view' || block?.type === 'collection_view_page'
+      block?.type === 'collection_view' ||
+      block?.type === 'collection_view_page'
   )
 
   if (!collectionViewBlocks.length) return recordMap
-
   ;(recordMap as any).collection_query ||= {}
 
   const tasks: Array<{
@@ -366,16 +366,16 @@ async function hydrateCollectionQueries(
 
 function ensureBlogGalleryCovers(recordMap: ExtendedRecordMap) {
   // Our blog database has these two properties, so we can target it safely.
-  const blogCollectionIds = Object.keys((recordMap as any).collection || {}).filter(
-    (collectionId) => {
-      const schema = (recordMap as any).collection?.[collectionId]?.value?.schema
-      if (!schema) return false
-      const names = new Set(
-        Object.values(schema).map((p: any) => String(p?.name || ''))
-      )
-      return names.has('Slug') && names.has('Published')
-    }
-  )
+  const blogCollectionIds = Object.keys(
+    (recordMap as any).collection || {}
+  ).filter((collectionId) => {
+    const schema = (recordMap as any).collection?.[collectionId]?.value?.schema
+    if (!schema) return false
+    const names = new Set(
+      Object.values(schema).map((p: any) => String(p?.name || ''))
+    )
+    return names.has('Slug') && names.has('Published')
+  })
 
   if (!blogCollectionIds.length) return recordMap
 
@@ -449,8 +449,8 @@ function sortCollectionQueriesByDate(recordMap: ExtendedRecordMap) {
   if (!collectionQuery) return recordMap
 
   for (const [collectionId, views] of Object.entries(collectionQuery)) {
-    const collectionSchema = (recordMap as any).collection?.[collectionId]?.value
-      ?.schema
+    const collectionSchema = (recordMap as any).collection?.[collectionId]
+      ?.value?.schema
     const hasSlugProp =
       !!collectionSchema &&
       Object.values(collectionSchema).some((p: any) => p?.name === 'Slug')
@@ -468,28 +468,33 @@ function sortCollectionQueriesByDate(recordMap: ExtendedRecordMap) {
 
       // If this collection looks like our blog database (has Slug/Published),
       // filter out rows that aren't publishable to avoid blank / ID-only pages.
-      const filtered = hasSlugProp || hasPublishedProp
-        ? blockIds.filter((id) => {
-            const block = (recordMap as any).block?.[id]?.value
-            if (!block || block.type !== 'page') return false
+      const filtered =
+        hasSlugProp || hasPublishedProp
+          ? blockIds.filter((id) => {
+              const block = (recordMap as any).block?.[id]?.value
+              if (!block || block.type !== 'page') return false
 
-            if (hasPublishedProp) {
-              const published = getPageProperty<boolean>('Published', block, recordMap)
-              if (published === false) return false
-            }
+              if (hasPublishedProp) {
+                const published = getPageProperty<boolean>(
+                  'Published',
+                  block,
+                  recordMap
+                )
+                if (published === false) return false
+              }
 
-            if (hasSlugProp) {
-              const slug = getPageProperty<string>('Slug', block, recordMap)
-              if (!slug || !String(slug).trim()) return false
-            }
+              if (hasSlugProp) {
+                const slug = getPageProperty<string>('Slug', block, recordMap)
+                if (!slug || !String(slug).trim()) return false
+              }
 
-            // Must have a title
-            const title = (block as any)?.properties?.title?.[0]?.[0]
-            if (!title || !String(title).trim()) return false
+              // Must have a title
+              const title = (block as any)?.properties?.title?.[0]?.[0]
+              if (!title || !String(title).trim()) return false
 
-            return true
-          })
-        : blockIds
+              return true
+            })
+          : blockIds
 
       const sorted = [...filtered].sort((a, b) => {
         const blockA = (recordMap as any).block?.[a]?.value
