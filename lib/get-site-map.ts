@@ -1,15 +1,15 @@
 import { getAllPagesInSpace, getPageProperty, uuidToId } from 'notion-utils'
 import pMemoize from 'p-memoize'
 
-import type * as types from './types'
 import * as config from './config'
-import { includeNotionIdInUrls } from './config'
+import type { ExtendedRecordMap, SiteMap } from './types'
 import { getCanonicalPageId } from './get-canonical-page-id'
+import { getPage as getHydratedPage } from './notion'
 import { notion } from './notion-api'
 
-const uuid = !!includeNotionIdInUrls
+const uuid = !!config.includeNotionIdInUrls
 
-export async function getSiteMap(): Promise<types.SiteMap> {
+export async function getSiteMap(): Promise<SiteMap> {
   const partialSiteMap = await getAllPages(
     config.rootNotionPageId,
     config.rootNotionSpaceId
@@ -18,46 +18,130 @@ export async function getSiteMap(): Promise<types.SiteMap> {
   return {
     site: config.site,
     ...partialSiteMap
-  } as types.SiteMap
+  } as SiteMap
 }
 
 const getAllPages = pMemoize(getAllPagesImpl, {
   cacheKey: (...args) => JSON.stringify(args)
 })
 
-const getPage = async (pageId: string, ...args) => {
+/** notion-utils reads `blockIds`; notion-client puts row ids in `collection_group_results.blockIds`. */
+function ensureBlockIdsForAllPagesInSpaceTraversal(
+  recordMap: ExtendedRecordMap
+): void {
+  const cq = (recordMap as any).collection_query
+  if (!cq || typeof cq !== 'object') return
+
+  for (const views of Object.values(cq)) {
+    if (!views || typeof views !== 'object') continue
+    for (const viewId of Object.keys(views as Record<string, unknown>)) {
+      const data = (views as any)[viewId]
+      if (!data || typeof data !== 'object') continue
+      const blockIds = data.collection_group_results?.blockIds || data.blockIds
+      if (Array.isArray(blockIds) && data.blockIds == null) {
+        ;(views as any)[viewId] = { ...data, blockIds }
+      }
+    }
+  }
+}
+
+const getPage = async (pageId: string) => {
   console.log('\nnotion getPage', uuidToId(pageId))
-  // For sitemap generation we only need metadata (titles, public flag, etc).
-  // Avoid hydrating collection queries here to reduce Notion load / rate limits.
-  return notion.getPage(pageId, {
+  const recordMap = await notion.getPage(pageId, {
     fetchMissingBlocks: false,
-    fetchCollections: false,
-    signFileUrls: false,
-    chunkLimit: 1
+    fetchCollections: true,
+    signFileUrls: false
   })
+  ensureBlockIdsForAllPagesInSpaceTraversal(recordMap)
+  return recordMap
+}
+
+function registerCanonicalPathsForPage(
+  map: Record<string, string>,
+  pageId: string,
+  recordMap: ExtendedRecordMap
+): Record<string, string> {
+  const primary = getCanonicalPageId(pageId, recordMap, { uuid })
+  const slugOnly = getCanonicalPageId(pageId, recordMap, { uuid: false })
+  const pathKeys = new Set<string>()
+  if (primary) pathKeys.add(primary)
+  if (uuid && slugOnly && slugOnly !== primary) pathKeys.add(slugOnly)
+
+  let next = map
+  for (const pathKey of pathKeys) {
+    if (!pathKey) continue
+    if (next[pathKey]) {
+      if (next[pathKey] !== pageId) {
+        console.warn('error duplicate canonical page id', {
+          pathKey,
+          pageId,
+          existingPageId: next[pathKey]
+        })
+      }
+      continue
+    }
+    next = { ...next, [pathKey]: pageId }
+  }
+  return next
+}
+
+/** Merge slug keys from the hydrated root page so paths match `mapPageUrl` / the index. */
+async function mergeCanonicalPathsFromHydratedRoot(
+  base: Record<string, string>
+): Promise<Record<string, string>> {
+  let merged = { ...base }
+  try {
+    const recordMap = await getHydratedPage(config.rootNotionPageId)
+    const cq = (recordMap as any).collection_query
+    if (!cq) return merged
+
+    const collectionPageIds = new Set<string>()
+    for (const views of Object.values(cq)) {
+      if (!views || typeof views !== 'object') continue
+      for (const q of Object.values(views as Record<string, unknown>)) {
+        const data = q as any
+        const blockIds =
+          data?.collection_group_results?.blockIds || data?.blockIds || []
+        if (!Array.isArray(blockIds)) continue
+        for (const id of blockIds) collectionPageIds.add(id)
+      }
+    }
+
+    for (const pageId of collectionPageIds) {
+      const blockRec = (recordMap as any).block?.[pageId]
+      const block = (blockRec?.value as any)?.value || blockRec?.value
+      if (!block || block.type !== 'page') continue
+      if (
+        !(getPageProperty<boolean | null>('Public', block, recordMap) ?? true)
+      ) {
+        continue
+      }
+      merged = registerCanonicalPathsForPage(merged, pageId, recordMap)
+    }
+  } catch (err: any) {
+    console.warn('mergeCanonicalPathsFromHydratedRoot failed', err?.message)
+  }
+  return merged
 }
 
 async function getAllPagesImpl(
   rootNotionPageId: string,
   rootNotionSpaceId: string
-): Promise<Partial<types.SiteMap>> {
+): Promise<Partial<SiteMap>> {
   const pageMap = await getAllPagesInSpace(
     rootNotionPageId,
     rootNotionSpaceId,
     getPage
   )
 
-  const canonicalPageMap = Object.keys(pageMap).reduce(
+  const fromWalk = Object.keys(pageMap).reduce(
     (map, pageId: string) => {
       const recordMap = pageMap[pageId]
       if (!recordMap) {
-        // If Notion fails to load a page during build (network, rate limits, etc),
-        // skip it so the rest of the site can still build.
         console.warn('skipping page due to load failure', { pageId })
         return map
       }
 
-      // Handle nested block structure - get the actual block value
       const blockRecord = recordMap.block[pageId]
       const block = (blockRecord?.value as any)?.value || blockRecord?.value
       if (
@@ -66,29 +150,12 @@ async function getAllPagesImpl(
         return map
       }
 
-      const canonicalPageId = getCanonicalPageId(pageId, recordMap, {
-        uuid
-      })
-
-      if (map[canonicalPageId]) {
-        // you can have multiple pages in different collections that have the same id
-        // TODO: we may want to error if neither entry is a collection page
-        console.warn('error duplicate canonical page id', {
-          canonicalPageId,
-          pageId,
-          existingPageId: map[canonicalPageId]
-        })
-
-        return map
-      } else {
-        return {
-          ...map,
-          [canonicalPageId]: pageId
-        }
-      }
+      return registerCanonicalPathsForPage(map, pageId, recordMap)
     },
-    {}
+    {} as Record<string, string>
   )
+
+  const canonicalPageMap = await mergeCanonicalPathsFromHydratedRoot(fromWalk)
 
   return {
     pageMap,

@@ -3,8 +3,14 @@ import dynamic from 'next/dynamic'
 import Image from 'next/legacy/image'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
-import { type PageBlock } from 'notion-types'
-import { formatDate, getBlockTitle, getPageProperty } from 'notion-utils'
+import { type ExtendedRecordMap, type PageBlock } from 'notion-types'
+import {
+  formatDate,
+  getBlockTitle,
+  getPageProperty,
+  parsePageId,
+  uuidToId
+} from 'notion-utils'
 import * as React from 'react'
 import BodyClassName from 'react-body-classname'
 import { type NotionComponents, NotionRenderer } from 'react-notion-x'
@@ -99,6 +105,36 @@ function Tweet({ id }: { id: string }) {
   return <TweetEmbed tweetId={id} />
 }
 
+function getPageBlockForRecordMap(
+  recordMap: ExtendedRecordMap | undefined,
+  pageId: string | undefined
+) {
+  const blocks = recordMap?.block
+  if (!blocks) return undefined
+  if (!pageId) {
+    const k = Object.keys(blocks)
+    return k.length ? blocks[k[0]]?.value : undefined
+  }
+  const candidates = [
+    pageId,
+    parsePageId(pageId, { uuid: true }),
+    parsePageId(pageId, { uuid: false })
+  ].filter(Boolean) as string[]
+  for (const id of candidates) {
+    const v = blocks[id]?.value
+    if (v) return v
+  }
+  const target = uuidToId(pageId)
+  for (const key of Object.keys(blocks)) {
+    if (uuidToId(key) === target) {
+      const v = blocks[key]?.value
+      if (v) return v
+    }
+  }
+  const k = Object.keys(blocks)
+  return k.length ? blocks[k[0]]?.value : undefined
+}
+
 const propertyLastEditedTimeValue = (
   { block, pageHeader },
   defaultFn: () => React.ReactNode
@@ -180,8 +216,10 @@ export function NotionPage({
     return mapPageUrl(site, recordMap, searchParams)
   }, [site, recordMap, lite])
 
-  const keys = Object.keys(recordMap?.block || {})
-  const block = recordMap?.block?.[keys[0]]?.value
+  const block = React.useMemo(
+    () => getPageBlockForRecordMap(recordMap, pageId),
+    [recordMap, pageId]
+  )
 
   // const isRootPage =
   //   parsePageId(block?.id) === parsePageId(site?.rootNotionPageId)
