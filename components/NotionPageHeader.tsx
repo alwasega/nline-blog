@@ -6,7 +6,13 @@ import { IoSunnyOutline } from 'react-icons/io5'
 import cs from 'classnames'
 import { Header, Search, useNotionContext } from 'react-notion-x'
 
-import { isSearchEnabled, name, navigationLinks, navigationStyle, rootNotionPageId } from '@/lib/config'
+import {
+  isSearchEnabled,
+  name,
+  navigationLinks,
+  navigationStyle,
+  rootNotionPageId
+} from '@/lib/config'
 import { useDarkMode } from '@/lib/use-dark-mode'
 import { getBlockTitle, uuidToId } from 'notion-utils'
 
