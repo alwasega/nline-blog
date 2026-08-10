@@ -4,11 +4,11 @@ import * as types from 'notion-types'
 import { IoMoonSharp } from 'react-icons/io5'
 import { IoSunnyOutline } from 'react-icons/io5'
 import cs from 'classnames'
-import { Breadcrumbs, Header, Search, useNotionContext } from 'react-notion-x'
+import { Header, Search, useNotionContext } from 'react-notion-x'
 
-import { isSearchEnabled, navigationLinks, navigationStyle } from '@/lib/config'
+import { isSearchEnabled, name, navigationLinks, navigationStyle, rootNotionPageId } from '@/lib/config'
 import { useDarkMode } from '@/lib/use-dark-mode'
-import { getBlockTitle } from 'notion-utils'
+import { getBlockTitle, uuidToId } from 'notion-utils'
 
 import styles from './styles.module.css'
 
@@ -42,6 +42,7 @@ export function NotionPageHeader({
   const { components, mapPageUrl, recordMap } = useNotionContext()
   const [showTitle, setShowTitle] = React.useState(false)
   const title = getBlockTitle(block, recordMap)
+  const isRootPage = uuidToId(block.id) === rootNotionPageId
 
   React.useEffect(() => {
     const titleElement = document.querySelector('.notion-title')
@@ -63,7 +64,18 @@ export function NotionPageHeader({
   return (
     <header className='notion-header'>
       <div className='notion-nav-header'>
-        <Breadcrumbs block={block} rootOnly={true} />
+        <div className='breadcrumbs'>
+          {isRootPage ? (
+            <div className='breadcrumb active'>{name}</div>
+          ) : (
+            <components.PageLink
+              href={mapPageUrl(rootNotionPageId)}
+              className='breadcrumb button'
+            >
+              {name}
+            </components.PageLink>
+          )}
+        </div>
 
         <div
           className={`notion-nav-header-title breadcrumbs ${showTitle ? 'show' : ''}`}
